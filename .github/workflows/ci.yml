@@ -1,0 +1,189 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-integration:
+    name: Verify ${{ matrix.integration_id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - integration_id: echo
+            project_dir: integrations/echo
+            package_module: lakeflow_echo
+            main: lakeflow_echo.integration.echo
+            environment_key: echo_environment
+            wheel_name: lakeflow_echo-0.0.1-py3-none-any.whl
+    env:
+      UV_PYTHON_DOWNLOADS: never
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.26"
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --project "${{ matrix.project_dir }}" --locked
+      - name: Build wheel
+        run: >-
+          uv build "${{ matrix.project_dir }}"
+          --project "${{ matrix.project_dir }}"
+          --wheel
+          --out-dir dist
+          --clear
+          --no-build-isolation
+          --no-create-gitignore
+      - name: Install built wheel
+        run: >-
+          uv pip install
+          --python "${{ matrix.project_dir }}/.venv/bin/python"
+          --reinstall
+          --no-deps
+          "dist/${{ matrix.wheel_name }}"
+      - name: Test installed wheel
+        run: >-
+          "${{ matrix.project_dir }}/.venv/bin/python"
+          -m unittest discover
+          -s "${{ matrix.project_dir }}/tests"
+      - name: Build frontend catalog artifact
+        run: >-
+          "${{ matrix.project_dir }}/.venv/bin/python"
+          scripts/package_catalog_artifact.py
+          --integration-id "${{ matrix.integration_id }}"
+          --package-module "${{ matrix.package_module }}"
+          --main "${{ matrix.main }}"
+          --source "${{ matrix.project_dir }}/src/${{ matrix.package_module }}/integration.py"
+          --wheel "dist/${{ matrix.wheel_name }}"
+          --environment-key "${{ matrix.environment_key }}"
+          --source-sha "${GITHUB_SHA}"
+          --output-dir build/catalog
+      - name: Upload catalog artifact
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: catalog-${{ matrix.integration_id }}-${{ github.sha }}
+          path: build/catalog
+          if-no-files-found: error
+          retention-days: 1
+
+  validate-bundle:
+    name: Validate bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UV_PYTHON_DOWNLOADS: never
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.26"
+          enable-cache: true
+      - name: Set up Databricks CLI
+        uses: databricks/setup-cli@d76f84cea9893ce68311a1f33fb0c95af6c963b7 # v1.17.0
+        with:
+          version: "1.17.0"
+      - name: Check repository wiring
+        run: python -m unittest discover -s tests
+      - name: Validate bundle
+        run: python scripts/validate_bundle.py
+
+  publish-artifacts:
+    name: Publish immutable artifacts
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs:
+      - verify-integration
+      - validate-bundle
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Download catalog artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: catalog-*-${{ github.sha }}
+          path: ${{ runner.temp }}/catalog
+          merge-multiple: true
+      - name: Publish source SHA
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          candidate="${RUNNER_TEMP}/catalog/integrations-examples/${SOURCE_SHA}"
+          if ! test -d "${candidate}"; then
+            echo "Catalog artifact is missing ${SOURCE_SHA}" >&2
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          deadline=$((SECONDS + ${PUBLISH_RETRY_TIMEOUT_SECONDS:-480}))
+          while ((SECONDS < deadline)); do
+            if git fetch --no-tags origin artifacts; then
+              git switch --force-create artifacts origin/artifacts
+            else
+              git switch --detach "${SOURCE_SHA}"
+              git branch --delete --force artifacts 2>/dev/null || true
+              git switch --orphan artifacts
+            fi
+
+            destination="integrations-examples/${SOURCE_SHA}"
+            if test -e "${destination}"; then
+              if diff --brief --recursive "${candidate}" "${destination}"; then
+                echo "Artifacts for ${SOURCE_SHA} already exist and are identical"
+                echo "Artifact commit: $(git rev-parse HEAD)"
+                exit 0
+              fi
+              echo "Refusing to replace immutable artifacts for ${SOURCE_SHA}" >&2
+              exit 1
+            fi
+
+            mkdir -p "${destination}"
+            cp -R "${candidate}/." "${destination}/"
+            git add "${destination}"
+            git commit -m "Publish artifacts for ${SOURCE_SHA}"
+
+            if git push origin HEAD:artifacts; then
+              echo "Artifact commit: $(git rev-parse HEAD)"
+              exit 0
+            fi
+
+            max_delay=${PUBLISH_RETRY_MAX_DELAY_SECONDS:-5}
+            if ((max_delay > 0)); then
+              sleep $((1 + RANDOM % max_delay))
+            fi
+          done
+
+          echo "Could not publish ${SOURCE_SHA} before the retry deadline" >&2
+          exit 1
