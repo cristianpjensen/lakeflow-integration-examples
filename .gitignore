@@ -1,0 +1,10 @@
+.databricks/
+.env
+**/.venv/
+__generated__/
+__pycache__/
+*.egg-info/
+*.py[cod]
+build/
+dist/
+**/dist/

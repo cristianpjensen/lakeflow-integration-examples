@@ -1,0 +1,20 @@
+[project]
+name = "lakeflow-echo"
+version = "0.0.1"
+description = "A Lakeflow integration that prints a message repeatedly."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "databricks-lakeflow-integrations==0.0.1",
+]
+
+[dependency-groups]
+dev = [
+    "hatchling==1.32.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lakeflow_echo"]
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
