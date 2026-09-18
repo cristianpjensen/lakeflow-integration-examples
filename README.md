@@ -30,7 +30,7 @@ Run the local equivalents of the CI checks:
 
 ```bash
 uv sync --project integrations/echo
-uv build integrations/echo --project integrations/echo --wheel --out-dir dist --clear --no-build-isolation --no-create-gitignore
+uv build integrations/echo --project integrations/echo --wheel --out-dir dist --clear --no-create-gitignore
 uv pip install --python integrations/echo/.venv/bin/python --reinstall --no-deps dist/lakeflow_echo-0.0.1-py3-none-any.whl
 integrations/echo/.venv/bin/python -m unittest discover -s integrations/echo/tests
 integrations/echo/.venv/bin/python scripts/package_catalog_artifact.py \

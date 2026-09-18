@@ -28,7 +28,7 @@ Run these checks from the repository root after changing an integration:
 
 ```bash
 uv sync --project integrations/echo
-uv build integrations/echo --project integrations/echo --wheel --out-dir dist --clear --no-build-isolation --no-create-gitignore
+uv build integrations/echo --project integrations/echo --wheel --out-dir dist --clear --no-create-gitignore
 uv pip install --python integrations/echo/.venv/bin/python --reinstall --no-deps dist/lakeflow_echo-0.0.1-py3-none-any.whl
 integrations/echo/.venv/bin/python -m unittest discover -s integrations/echo/tests
 integrations/echo/.venv/bin/python scripts/package_catalog_artifact.py --integration-id echo --package-module lakeflow_echo --main lakeflow_echo.integration.echo --source integrations/echo/src/lakeflow_echo/integration.py --wheel dist/lakeflow_echo-0.0.1-py3-none-any.whl --environment-key echo_environment --source-sha local --output-dir build/catalog

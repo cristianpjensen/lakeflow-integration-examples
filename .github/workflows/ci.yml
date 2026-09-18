@@ -50,7 +50,6 @@ jobs:
           --wheel
           --out-dir dist
           --clear
-          --no-build-isolation
           --no-create-gitignore
       - name: Install built wheel
         run: >-

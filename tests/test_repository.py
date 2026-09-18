@@ -7,6 +7,11 @@ WHEEL_DEPENDENCY_PLACEHOLDER = "__DATABRICKS_CURATED_INTEGRATION_WHEEL_PATH__"
 
 
 class RepositoryContractTest(unittest.TestCase):
+    def test_builds_do_not_depend_on_runner_python_packages(self) -> None:
+        for relative_path in [".github/workflows/ci.yml", "databricks.yml"]:
+            path = REPOSITORY_ROOT / relative_path
+            self.assertNotIn("--no-build-isolation", path.read_text(), relative_path)
+
     def test_every_integration_is_wired_into_ci_and_the_bundle(self) -> None:
         integration_ids = sorted(
             path.name for path in (REPOSITORY_ROOT / "integrations").iterdir() if (path / "pyproject.toml").is_file()

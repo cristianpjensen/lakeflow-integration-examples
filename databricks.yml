@@ -12,7 +12,7 @@ artifacts:
     path: integrations/echo
     build: >
       uv sync &&
-      uv build . --wheel --out-dir dist --clear --no-build-isolation --no-create-gitignore
+      uv build . --wheel --out-dir dist --clear --no-create-gitignore
   echo_integration_yaml:
     build: >
       uv sync --project integrations/echo &&
