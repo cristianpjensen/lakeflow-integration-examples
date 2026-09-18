@@ -1,5 +1,4 @@
 import argparse
-import hashlib
 import json
 import re
 import tempfile
@@ -16,12 +15,6 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 SOURCE_PATH = REPOSITORY_ROOT / "integrations/echo/src/lakeflow_echo/integration.py"
 WHEEL_NAME = "lakeflow_echo-0.0.1-py3-none-any.whl"
 WHEEL_PATH = REPOSITORY_ROOT / "dist" / WHEEL_NAME
-SOURCE_SHA = "a" * 40
-
-
-def file_sha256(path: Path) -> str:
-    with path.open("rb") as file:
-        return hashlib.file_digest(file, "sha256").hexdigest()
 
 
 class EchoArtifactTest(unittest.TestCase):
@@ -38,21 +31,18 @@ class EchoArtifactTest(unittest.TestCase):
                     source=SOURCE_PATH,
                     wheel=WHEEL_PATH,
                     environment_key="echo_environment",
-                    source_sha=SOURCE_SHA,
                     output_dir=output_dir,
                 )
             )
 
-            version_dir = output_dir / "integrations-examples" / SOURCE_SHA
             relative_files = sorted(
-                path.relative_to(version_dir).as_posix()
-                for path in version_dir.rglob("*")
+                path.relative_to(output_dir).as_posix()
+                for path in output_dir.rglob("*")
                 if path.is_file()
             )
             self.assertEqual(
                 relative_files,
                 [
-                    "echo/SHA256SUMS",
                     "echo/integration.py",
                     "echo/integration.yaml",
                     f"echo/{WHEEL_NAME}",
@@ -82,20 +72,6 @@ class EchoArtifactTest(unittest.TestCase):
                     "dependencies": [WHEEL_DEPENDENCY_PLACEHOLDER],
                 },
             )
-
-            expected_checksums = {
-                path.name: file_sha256(path)
-                for path in [
-                    artifact_dir / "integration.py",
-                    artifact_dir / "integration.yaml",
-                    artifact_dir / WHEEL_NAME,
-                ]
-            }
-            actual_checksums = {}
-            for line in (artifact_dir / "SHA256SUMS").read_text().splitlines():
-                digest, name = line.split("  ", maxsplit=1)
-                actual_checksums[name] = digest
-            self.assertEqual(actual_checksums, expected_checksums)
 
             job_definition = (REPOSITORY_ROOT / "resources/echo.job.yml").read_text()
             job_parameter_names = re.findall(r"^\s+- name: ([a-z_][a-z0-9_]*)$", job_definition, re.MULTILINE)

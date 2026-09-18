@@ -12,7 +12,7 @@ Use the published `databricks-lakeflow-integrations` package for the authoring A
 Invoke its generator as a dependency; keep generator implementation code outside this repository.
 
 Treat `artifacts` as a machine-published branch.
-Publish immutable outputs under `integrations-examples/<source-sha>/<integration-id>/`, and never edit generated branch contents manually.
+Publish the latest outputs under `<integration-id>/`, and replace the branch contents as one complete artifact set.
 Keep `integration.py`, `integration.yaml`, and the wheel in sync through `scripts/package_catalog_artifact.py`.
 Keep `__DATABRICKS_CURATED_INTEGRATION_WHEEL_PATH__` in every generated YAML until the frontend installer substitutes the uploaded wheel path.
 Use an artifact commit SHA, not the mutable `artifacts` branch name, in frontend URLs.
@@ -31,14 +31,14 @@ uv sync --project integrations/echo
 uv build integrations/echo --project integrations/echo --wheel --out-dir dist --clear --no-create-gitignore
 uv pip install --python integrations/echo/.venv/bin/python --reinstall --no-deps dist/lakeflow_echo-0.0.1-py3-none-any.whl
 integrations/echo/.venv/bin/python -m unittest discover -s integrations/echo/tests
-integrations/echo/.venv/bin/python scripts/package_catalog_artifact.py --integration-id echo --package-module lakeflow_echo --main lakeflow_echo.integration.echo --source integrations/echo/src/lakeflow_echo/integration.py --wheel dist/lakeflow_echo-0.0.1-py3-none-any.whl --environment-key echo_environment --source-sha local --output-dir build/catalog
+integrations/echo/.venv/bin/python scripts/package_catalog_artifact.py --integration-id echo --package-module lakeflow_echo --main lakeflow_echo.integration.echo --source integrations/echo/src/lakeflow_echo/integration.py --wheel dist/lakeflow_echo-0.0.1-py3-none-any.whl --environment-key echo_environment --output-dir build/catalog
 python -m unittest discover -s tests
 databricks bundle validate
 ```
 
 Add positive, boundary, and invalid-input coverage for behavior changes.
 Confirm generated YAML contains the wheel placeholder exactly once; the frontend installer replaces it with the uploaded workspace wheel path.
-Confirm publication tests reject byte changes beneath an existing source SHA and preserve both sides of a non-fast-forward race.
+Confirm publication tests cover identical no-ops, changed overwrites, and non-fast-forward retries.
 
 ## Documentation
 

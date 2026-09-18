@@ -40,13 +40,12 @@ integrations/echo/.venv/bin/python scripts/package_catalog_artifact.py \
   --source integrations/echo/src/lakeflow_echo/integration.py \
   --wheel dist/lakeflow_echo-0.0.1-py3-none-any.whl \
   --environment-key echo_environment \
-  --source-sha local \
   --output-dir build/catalog
 python -m unittest discover -s tests
 databricks bundle validate
 ```
 
-The packaging command generates and validates `build/catalog/integrations-examples/local/echo/integration.yaml` and places it beside the source and wheel.
+The packaging command generates and validates `build/catalog/echo/integration.yaml` and places it beside the source and wheel.
 Both catalog packaging and the DAB artifact build put `__DATABRICKS_CURATED_INTEGRATION_WHEEL_PATH__` in generated YAML.
 The frontend installer replaces that value with the workspace path where it uploads the wheel.
 
@@ -66,29 +65,27 @@ The job succeeds after printing `Hello from Lakeflow Integrations` three times.
 ## Artifact publication
 
 Pull requests and pushes to `main` install and test each built wheel, generate the YAML, validate the frontend artifact contract, and validate the bundle.
-Pushes to `main` also publish immutable artifacts to the `artifacts` branch under this layout:
+Pushes to `main` also publish the latest artifacts to the `artifacts` branch under this layout:
 
 ```text
-integrations-examples/<source-sha>/
-└── echo/
-    ├── integration.py
-    ├── integration.yaml
-    ├── lakeflow_echo-0.0.1-py3-none-any.whl
-    └── SHA256SUMS
+echo/
+├── integration.py
+├── integration.yaml
+└── lakeflow_echo-0.0.1-py3-none-any.whl
 ```
 
 The workflow creates the `artifacts` branch on its first successful run.
 Concurrent publishers retry against the latest branch head for up to eight minutes.
-An identical rerun is a no-op, while a byte-different rerun for an existing SHA fails instead of changing pinned URLs.
+Each changed artifact set replaces the branch contents, while an identical rerun is a no-op.
 The repository must allow GitHub Actions to write repository contents.
 The repository must be public before the frontend can fetch these URLs without GitHub credentials.
 
 After publication, use the artifact commit SHA printed by the workflow in the frontend URLs:
 
 ```text
-https://raw.githubusercontent.com/<owner>/<repo>/<artifact-commit-sha>/integrations-examples/<source-sha>/echo/integration.py
-https://raw.githubusercontent.com/<owner>/<repo>/<artifact-commit-sha>/integrations-examples/<source-sha>/echo/lakeflow_echo-0.0.1-py3-none-any.whl
-https://raw.githubusercontent.com/<owner>/<repo>/<artifact-commit-sha>/integrations-examples/<source-sha>/echo/integration.yaml
+https://raw.githubusercontent.com/<owner>/<repo>/<artifact-commit-sha>/echo/integration.py
+https://raw.githubusercontent.com/<owner>/<repo>/<artifact-commit-sha>/echo/lakeflow_echo-0.0.1-py3-none-any.whl
+https://raw.githubusercontent.com/<owner>/<repo>/<artifact-commit-sha>/echo/integration.yaml
 ```
 
-Pin both SHAs in frontend definitions so branch changes cannot alter a reviewed artifact set.
+Pin the artifact commit SHA in frontend definitions so branch changes cannot alter a reviewed artifact set.

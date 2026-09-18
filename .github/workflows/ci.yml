@@ -73,7 +73,6 @@ jobs:
           --source "${{ matrix.project_dir }}/src/${{ matrix.package_module }}/integration.py"
           --wheel "dist/${{ matrix.wheel_name }}"
           --environment-key "${{ matrix.environment_key }}"
-          --source-sha "${GITHUB_SHA}"
           --output-dir build/catalog
       - name: Upload catalog artifact
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
@@ -114,13 +113,16 @@ jobs:
         run: python scripts/validate_bundle.py
 
   publish-artifacts:
-    name: Publish immutable artifacts
+    name: Publish artifacts
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs:
       - verify-integration
       - validate-bundle
     permissions:
       contents: write
+    concurrency:
+      group: publish-artifacts
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -132,15 +134,15 @@ jobs:
           pattern: catalog-*-${{ github.sha }}
           path: ${{ runner.temp }}/catalog
           merge-multiple: true
-      - name: Publish source SHA
+      - name: Publish artifacts
         env:
           SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
-          candidate="${RUNNER_TEMP}/catalog/integrations-examples/${SOURCE_SHA}"
+          candidate="${RUNNER_TEMP}/catalog"
           if ! test -d "${candidate}"; then
-            echo "Catalog artifact is missing ${SOURCE_SHA}" >&2
+            echo "Catalog artifact is missing" >&2
             exit 1
           fi
 
@@ -157,20 +159,14 @@ jobs:
               git switch --orphan artifacts
             fi
 
-            destination="integrations-examples/${SOURCE_SHA}"
-            if test -e "${destination}"; then
-              if diff --brief --recursive "${candidate}" "${destination}"; then
-                echo "Artifacts for ${SOURCE_SHA} already exist and are identical"
-                echo "Artifact commit: $(git rev-parse HEAD)"
-                exit 0
-              fi
-              echo "Refusing to replace immutable artifacts for ${SOURCE_SHA}" >&2
-              exit 1
+            git rm -r --quiet --ignore-unmatch .
+            cp -R "${candidate}/." .
+            git add --all
+            if git diff --cached --quiet; then
+              echo "Artifacts are already current"
+              echo "Artifact commit: $(git rev-parse HEAD)"
+              exit 0
             fi
-
-            mkdir -p "${destination}"
-            cp -R "${candidate}/." "${destination}/"
-            git add "${destination}"
             git commit -m "Publish artifacts for ${SOURCE_SHA}"
 
             if git push origin HEAD:artifacts; then

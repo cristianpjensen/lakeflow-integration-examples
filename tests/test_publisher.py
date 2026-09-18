@@ -23,7 +23,7 @@ def run_git(directory: Path, *arguments: str) -> subprocess.CompletedProcess[str
 
 def publisher_script() -> str:
     workflow = (REPOSITORY_ROOT / ".github/workflows/ci.yml").read_text()
-    publish_step = workflow.split("      - name: Publish source SHA\n", maxsplit=1)[1]
+    publish_step = workflow.split("      - name: Publish artifacts\n", maxsplit=1)[1]
     return textwrap.dedent(publish_step.split("        run: |\n", maxsplit=1)[1])
 
 
@@ -41,7 +41,7 @@ class ArtifactPublisherTest(unittest.TestCase):
         run_git(source, "config", "user.email", "test@example.com")
 
         source_shas = []
-        for version in range(3):
+        for version in range(2):
             (source / "source.txt").write_text(f"version {version}\n")
             run_git(source, "add", "source.txt")
             run_git(source, "commit", "-m", f"Source {version}")
@@ -51,8 +51,8 @@ class ArtifactPublisherTest(unittest.TestCase):
         run_git(source, "push", "origin", "main")
         return origin, source, source_shas
 
-    def create_candidate(self, runner_temp: Path, source_sha: str, content: str) -> Path:
-        integration_dir = runner_temp / "catalog/integrations-examples" / source_sha / "echo"
+    def create_candidate(self, runner_temp: Path, content: str) -> Path:
+        integration_dir = runner_temp / "catalog/echo"
         integration_dir.mkdir(parents=True)
         (integration_dir / "integration.py").write_text(content)
         return integration_dir
@@ -64,7 +64,6 @@ class ArtifactPublisherTest(unittest.TestCase):
         source_sha: str,
         *,
         path: str | None = None,
-        check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
         environment.update(
@@ -81,40 +80,42 @@ class ArtifactPublisherTest(unittest.TestCase):
             ["bash", "-c", publisher_script()],
             cwd=source,
             env=environment,
-            check=check,
+            check=True,
             capture_output=True,
             text=True,
         )
 
-    def test_identical_rerun_is_a_noop_and_different_rerun_is_rejected(self) -> None:
+    def test_identical_rerun_is_a_noop_and_changed_rerun_overwrites_files(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             origin, source, source_shas = self.create_repository(root)
             runner_temp = root / "runner"
-            integration_dir = self.create_candidate(runner_temp, source_shas[0], "first\n")
+            integration_dir = self.create_candidate(runner_temp, "first\n")
+            obsolete_path = integration_dir / "obsolete.txt"
+            obsolete_path.write_text("obsolete\n")
 
             first = self.run_publisher(source, runner_temp, source_shas[0])
             identical = self.run_publisher(source, runner_temp, source_shas[0])
-            (integration_dir / "integration.py").write_text("different\n")
-            different = self.run_publisher(source, runner_temp, source_shas[0], check=False)
+            (integration_dir / "integration.py").write_text("second\n")
+            obsolete_path.unlink()
+            changed = self.run_publisher(source, runner_temp, source_shas[1])
 
-            published = run_git(
-                origin,
-                "show",
-                f"artifacts:integrations-examples/{source_shas[0]}/echo/integration.py",
-            ).stdout
+            published = run_git(origin, "show", "artifacts:echo/integration.py").stdout
+            published_paths = run_git(origin, "ls-tree", "-r", "--name-only", "artifacts").stdout.splitlines()
+            commit_count = run_git(origin, "rev-list", "--count", "artifacts").stdout.strip()
             self.assertIn("Artifact commit:", first.stdout)
-            self.assertIn("already exist and are identical", identical.stdout)
-            self.assertEqual(different.returncode, 1)
-            self.assertIn("Refusing to replace immutable artifacts", different.stderr)
-            self.assertEqual(published, "first\n")
+            self.assertIn("already current", identical.stdout)
+            self.assertIn("Artifact commit:", changed.stdout)
+            self.assertEqual(published, "second\n")
+            self.assertEqual(published_paths, ["echo/integration.py"])
+            self.assertEqual(commit_count, "2")
 
-    def test_non_fast_forward_retry_preserves_both_source_shas(self) -> None:
+    def test_non_fast_forward_retry_publishes_complete_candidate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             origin, source, source_shas = self.create_repository(root)
             first_runner = root / "first-runner"
-            self.create_candidate(first_runner, source_shas[0], "first\n")
+            self.create_candidate(first_runner, "first\n")
             self.run_publisher(source, first_runner, source_shas[0])
 
             publisher = root / "publisher"
@@ -122,7 +123,7 @@ class ArtifactPublisherTest(unittest.TestCase):
             run_git(root, "clone", str(origin), str(publisher))
             run_git(root, "clone", str(origin), str(competitor))
             runner_temp = root / "racing-runner"
-            self.create_candidate(runner_temp, source_shas[1], "second\n")
+            self.create_candidate(runner_temp, "second\n")
 
             wrapper_dir = root / "bin"
             wrapper_dir.mkdir()
@@ -140,12 +141,11 @@ class ArtifactPublisherTest(unittest.TestCase):
                     real_git = {REAL_GIT!r}
                     marker = pathlib.Path({str(marker)!r})
                     competitor = pathlib.Path({str(competitor)!r})
-                    source_sha = {source_shas[2]!r}
                     if len(sys.argv) > 1 and sys.argv[1] == "push" and not marker.exists():
                         marker.write_text("pushed")
                         subprocess.run([real_git, "-C", competitor, "fetch", "origin", "artifacts"], check=True)
                         subprocess.run([real_git, "-C", competitor, "switch", "--force-create", "artifacts", "origin/artifacts"], check=True)
-                        destination = competitor / "integrations-examples" / source_sha / "echo"
+                        destination = competitor / "echo"
                         destination.mkdir(parents=True)
                         (destination / "integration.py").write_text("third\\n")
                         subprocess.run([real_git, "-C", competitor, "config", "user.name", "Competitor"], check=True)
@@ -165,11 +165,10 @@ class ArtifactPublisherTest(unittest.TestCase):
                 source_shas[1],
                 path=f"{wrapper_dir}:{os.environ['PATH']}",
             )
-            published_paths = run_git(origin, "ls-tree", "-r", "--name-only", "artifacts").stdout.splitlines()
+            published = run_git(origin, "show", "artifacts:echo/integration.py").stdout
 
             self.assertIn("Artifact commit:", result.stdout)
-            for source_sha in source_shas:
-                self.assertIn(f"integrations-examples/{source_sha}/echo/integration.py", published_paths)
+            self.assertEqual(published, "second\n")
 
 
 if __name__ == "__main__":

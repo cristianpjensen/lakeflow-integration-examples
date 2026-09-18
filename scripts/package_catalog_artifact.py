@@ -1,5 +1,4 @@
 import argparse
-import hashlib
 import json
 import re
 import shutil
@@ -11,7 +10,6 @@ from databricks.lakeflow.integrations.generate import main as generate_integrati
 
 WHEEL_DEPENDENCY_PLACEHOLDER = "__DATABRICKS_CURATED_INTEGRATION_WHEEL_PATH__"
 INTEGRATION_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-SOURCE_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 SUPPORTED_CONFIG_TYPES = frozenset({"boolean", "integer", "number", "string"})
 
 
@@ -23,7 +21,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--wheel", required=True, type=Path)
     parser.add_argument("--environment-key", required=True)
-    parser.add_argument("--source-sha", required=True)
     parser.add_argument("--output-dir", required=True, type=Path)
     return parser.parse_args()
 
@@ -31,8 +28,6 @@ def parse_args() -> argparse.Namespace:
 def validate_args(args: argparse.Namespace) -> None:
     if not INTEGRATION_ID_PATTERN.fullmatch(args.integration_id):
         raise ValueError("integration ID must be lowercase kebab-case")
-    if args.source_sha != "local" and not SOURCE_SHA_PATTERN.fullmatch(args.source_sha):
-        raise ValueError("source SHA must be a 40-character lowercase hexadecimal SHA or 'local'")
     if not args.source.is_file() or args.source.suffix != ".py":
         raise ValueError("source must be an existing .py file")
     if not args.wheel.is_file() or args.wheel.suffix != ".whl":
@@ -99,17 +94,8 @@ def load_and_validate_definition(path: Path, expected_main: str) -> dict[str, An
     return definition
 
 
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def package_artifact(args: argparse.Namespace) -> Path:
-    version_dir = args.output_dir / "integrations-examples" / args.source_sha
-    integration_dir = version_dir / args.integration_id
+    integration_dir = args.output_dir / args.integration_id
     shutil.rmtree(integration_dir, ignore_errors=True)
     integration_dir.mkdir(parents=True)
 
@@ -123,10 +109,6 @@ def package_artifact(args: argparse.Namespace) -> Path:
     wheel_path = integration_dir / args.wheel.name
     shutil.copyfile(args.source, source_path)
     shutil.copyfile(args.wheel, wheel_path)
-
-    artifacts = {"source": source_path, "wheel": wheel_path, "yaml": yaml_path}
-    checksums = "".join(f"{sha256(path)}  {path.name}\n" for path in sorted(artifacts.values()))
-    (integration_dir / "SHA256SUMS").write_text(checksums)
     return integration_dir
 
 
