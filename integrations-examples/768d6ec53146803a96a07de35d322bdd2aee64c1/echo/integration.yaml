@@ -1,0 +1,31 @@
+{
+  "schema": "lakeflow-integration-v0.1.0",
+  "name": "Echo",
+  "description": "Prints a message a specified number of times.",
+  "main": "lakeflow_echo.integration.echo",
+  "config": {
+    "type": "object",
+    "properties": {
+      "message": {
+        "type": "string"
+      },
+      "repeat_count": {
+        "type": "integer",
+        "x-ui": {
+          "widget": "number"
+        }
+      }
+    },
+    "required": [
+      "message",
+      "repeat_count"
+    ]
+  },
+  "environment": {
+    "environment_key": "echo_environment",
+    "environment_version": "5",
+    "dependencies": [
+      "__DATABRICKS_CURATED_INTEGRATION_WHEEL_PATH__"
+    ]
+  }
+}
