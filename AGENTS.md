@@ -23,7 +23,7 @@ Pin GitHub Actions by full commit SHA.
 Treat `artifacts` as a machine-published branch.
 Publish the latest complete artifact set under `<integration-id>/`.
 Keep `integration.py`, `integration.yaml`, and the wheel in sync.
-Keep `__DATABRICKS_CURATED_INTEGRATION_WHEEL_PATH__` exactly once in every generated definition.
+Keep `{{WHEEL_PATH}}` exactly once in every generated definition.
 Use an artifact commit SHA, not the mutable branch name, in frontend URLs.
 
 ## Development

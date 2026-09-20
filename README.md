@@ -74,7 +74,7 @@ echo/
 └── lakeflow_echo-0.0.1-py3-none-any.whl
 ```
 
-Generated definitions contain `__DATABRICKS_CURATED_INTEGRATION_WHEEL_PATH__` exactly once.
+Generated definitions contain `{{WHEEL_PATH}}` exactly once.
 The Databricks installer replaces that value with the uploaded workspace wheel path.
 
 Use the artifact commit SHA printed by CI in immutable frontend URLs:

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly wheel_placeholder="__DATABRICKS_CURATED_INTEGRATION_WHEEL_PATH__"
+readonly wheel_placeholder="{{WHEEL_PATH}}"
 
 usage() {
   echo "Usage: $0 <integration-id>" >&2
