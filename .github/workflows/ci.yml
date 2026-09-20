@@ -11,20 +11,77 @@ permissions:
   contents: read
 
 jobs:
+  discover-integrations:
+    name: Discover integrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      integration_ids: ${{ steps.discover.outputs.integration_ids }}
+      first_integration_id: ${{ steps.discover.outputs.first_integration_id }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Check shell syntax
+        run: bash -n scripts/*.sh
+      - name: Discover integrations
+        id: discover
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          integration_ids=()
+          for pyproject_path in integrations/*/pyproject.toml; do
+            if ! test -f "${pyproject_path}"; then
+              continue
+            fi
+            integration_id="${pyproject_path#integrations/}"
+            integration_id="${integration_id%/pyproject.toml}"
+            if [[ ! "${integration_id}" =~ ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]]; then
+              echo "Invalid integration directory: ${integration_id}" >&2
+              exit 1
+            fi
+            integration_ids+=("${integration_id}")
+            if ! test -f "resources/${integration_id}.yml"; then
+              echo "Missing resource for integration: ${integration_id}" >&2
+              exit 1
+            fi
+          done
+
+          if (( ${#integration_ids[@]} == 0 )); then
+            echo "No integrations found" >&2
+            exit 1
+          fi
+
+          for resource_path in resources/*.yml; do
+            integration_id="${resource_path#resources/}"
+            integration_id="${integration_id%.yml}"
+            if ! test -f "integrations/${integration_id}/pyproject.toml"; then
+              echo "Orphan integration resource: ${integration_id}" >&2
+              exit 1
+            fi
+          done
+
+          integration_ids_json="["
+          separator=""
+          for integration_id in "${integration_ids[@]}"; do
+            integration_ids_json+="${separator}\"${integration_id}\""
+            separator=","
+          done
+          integration_ids_json+="]"
+          echo "integration_ids=${integration_ids_json}" >> "${GITHUB_OUTPUT}"
+          echo "first_integration_id=${integration_ids[0]}" >> "${GITHUB_OUTPUT}"
+
   verify-integration:
     name: Verify ${{ matrix.integration_id }}
+    needs: discover-integrations
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - integration_id: echo
-            project_dir: integrations/echo
-            package_module: lakeflow_echo
-            main: lakeflow_echo.integration.echo
-            environment_key: echo_environment
-            wheel_name: lakeflow_echo-0.0.1-py3-none-any.whl
+        integration_id: ${{ fromJSON(needs.discover-integrations.outputs.integration_ids) }}
     env:
       UV_PYTHON_DOWNLOADS: never
     steps:
@@ -41,39 +98,30 @@ jobs:
         with:
           version: "0.11.26"
           enable-cache: true
-      - name: Install locked dependencies
-        run: uv sync --project "${{ matrix.project_dir }}" --locked
-      - name: Build wheel
-        run: >-
-          uv build "${{ matrix.project_dir }}"
-          --project "${{ matrix.project_dir }}"
-          --wheel
-          --out-dir dist
-          --clear
-          --no-create-gitignore
-      - name: Install built wheel
-        run: >-
-          uv pip install
-          --python "${{ matrix.project_dir }}/.venv/bin/python"
-          --reinstall
-          --no-deps
-          "dist/${{ matrix.wheel_name }}"
-      - name: Test installed wheel
-        run: >-
-          "${{ matrix.project_dir }}/.venv/bin/python"
-          -m unittest discover
-          -s "${{ matrix.project_dir }}/tests"
-      - name: Build frontend catalog artifact
-        run: >-
-          "${{ matrix.project_dir }}/.venv/bin/python"
-          scripts/package_catalog_artifact.py
-          --integration-id "${{ matrix.integration_id }}"
-          --package-module "${{ matrix.package_module }}"
-          --main "${{ matrix.main }}"
-          --source "${{ matrix.project_dir }}/src/${{ matrix.package_module }}/integration.py"
-          --wheel "dist/${{ matrix.wheel_name }}"
-          --environment-key "${{ matrix.environment_key }}"
-          --output-dir build/catalog
+      - name: Verify integration
+        run: ./scripts/check-integration.sh "${{ matrix.integration_id }}"
+      - name: Smoke-test scaffolding
+        if: matrix.integration_id == needs.discover-integrations.outputs.first_integration_id
+        run: |
+          smoke_id="class-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          smoke_module="lakeflow_${smoke_id//-/_}"
+          smoke_function="integration_${smoke_id//-/_}"
+          ./scripts/new-integration.sh "${smoke_id}" "CI Smoke"
+          grep -Fq "def ${smoke_function}()" "integrations/${smoke_id}/src/${smoke_module}/integration.py"
+          grep -Fq "main: ${smoke_module}.integration.${smoke_function}" "resources/${smoke_id}.yml"
+          grep -Fq 'https://pypi.org/simple' "integrations/${smoke_id}/uv.lock"
+          if grep -Fq 'pypi-proxy.cloud.databricks.com' "integrations/${smoke_id}/uv.lock"; then
+            echo "Scaffolded lockfile contains an internal package URL" >&2
+            exit 1
+          fi
+          if ./scripts/new-integration.sh "${smoke_id}" Duplicate; then
+            echo "Scaffolder overwrote an existing integration" >&2
+            exit 1
+          fi
+          if ./scripts/new-integration.sh 123 Numeric; then
+            echo "Scaffolder accepted an invalid integration ID" >&2
+            exit 1
+          fi
       - name: Upload catalog artifact
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -83,46 +131,15 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  validate-bundle:
-    name: Validate bundle
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      UV_PYTHON_DOWNLOADS: never
-    steps:
-      - name: Check out source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Set up uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          version: "0.11.26"
-          enable-cache: true
-      - name: Set up Databricks CLI
-        uses: databricks/setup-cli@d76f84cea9893ce68311a1f33fb0c95af6c963b7 # v1.17.0
-        with:
-          version: "1.17.0"
-      - name: Check repository wiring
-        run: python -m unittest discover -s tests
-      - name: Validate bundle
-        run: python scripts/validate_bundle.py
-
   publish-artifacts:
     name: Publish artifacts
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs:
-      - verify-integration
-      - validate-bundle
+    needs: verify-integration
     permissions:
       contents: write
     concurrency:
       group: publish-artifacts
-      cancel-in-progress: true
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -135,50 +152,4 @@ jobs:
           path: ${{ runner.temp }}/catalog
           merge-multiple: true
       - name: Publish artifacts
-        env:
-          SOURCE_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-
-          candidate="${RUNNER_TEMP}/catalog"
-          if ! test -d "${candidate}"; then
-            echo "Catalog artifact is missing" >&2
-            exit 1
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          deadline=$((SECONDS + ${PUBLISH_RETRY_TIMEOUT_SECONDS:-480}))
-          while ((SECONDS < deadline)); do
-            if git fetch --no-tags origin artifacts; then
-              git switch --force-create artifacts origin/artifacts
-            else
-              git switch --detach "${SOURCE_SHA}"
-              git branch --delete --force artifacts 2>/dev/null || true
-              git switch --orphan artifacts
-            fi
-
-            git rm -r --quiet --ignore-unmatch .
-            cp -R "${candidate}/." .
-            git add --all
-            if git diff --cached --quiet; then
-              echo "Artifacts are already current"
-              echo "Artifact commit: $(git rev-parse HEAD)"
-              exit 0
-            fi
-            git commit -m "Publish artifacts for ${SOURCE_SHA}"
-
-            if git push origin HEAD:artifacts; then
-              echo "Artifact commit: $(git rev-parse HEAD)"
-              exit 0
-            fi
-
-            max_delay=${PUBLISH_RETRY_MAX_DELAY_SECONDS:-5}
-            if ((max_delay > 0)); then
-              sleep $((1 + RANDOM % max_delay))
-            fi
-          done
-
-          echo "Could not publish ${SOURCE_SHA} before the retry deadline" >&2
-          exit 1
+        run: ./scripts/publish-artifacts.sh "${RUNNER_TEMP}/catalog" "${GITHUB_SHA}"

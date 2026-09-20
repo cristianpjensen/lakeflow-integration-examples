@@ -1,3 +1,9 @@
+artifacts:
+  echo_wheel:
+    type: whl
+    path: ../integrations/echo
+    build: ../../scripts/build-integration.sh echo
+
 resources:
   jobs:
     echo_integration_test:

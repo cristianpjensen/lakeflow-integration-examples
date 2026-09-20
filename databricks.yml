@@ -6,33 +6,7 @@ bundle:
 include:
   - resources/*.yml
 
-artifacts:
-  echo_wheel:
-    type: whl
-    path: integrations/echo
-    build: >
-      uv sync &&
-      uv build . --wheel --out-dir dist --clear --no-create-gitignore
-  echo_integration_yaml:
-    build: >
-      uv sync --project integrations/echo &&
-      integrations/echo/.venv/bin/python -c "import shutil;
-      shutil.rmtree('__generated__/echo', ignore_errors=True);
-      from databricks.lakeflow.integrations.generate import main;
-      main([
-        '--package-module', 'lakeflow_echo',
-        '--output-dir', '__generated__/echo',
-        '--environment-version', '5',
-        '--environment-key', 'echo_environment',
-        '--dependency', '__DATABRICKS_CURATED_INTEGRATION_WHEEL_PATH__',
-      ])"
-    files:
-      - source: __generated__/echo/*.yml
-
 targets:
   dev:
     mode: development
     default: true
-  ci:
-    workspace:
-      root_path: /Workspace/.bundle-ci/${bundle.name}/${bundle.target}

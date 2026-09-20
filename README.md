@@ -1,57 +1,58 @@
-# Lakeflow Integration Examples
+# Lakeflow Integrations
 
-This repository contains small, runnable examples for Lakeflow Jobs integrations.
-Each example is a Databricks Asset Bundle resource, a Python wheel, and generated integration YAML that the Databricks frontend can install into a user's workspace.
+This repository contains official Databricks-authored Lakeflow integrations that users can install as starting points.
+Each integration is an independently locked Python package with one generated catalog definition and one runnable Databricks Asset Bundle job.
 
-The repository starts with Echo, which accepts a message and a repeat count and prints the message that many times.
+## Available integrations
 
-## Layout
+| Integration | Description |
+| --- | --- |
+| Echo | Prints a message a specified number of times. |
+
+## Repository layout
 
 ```text
-.
-├── integrations/echo/              # Echo package, lock, source, and tests
-├── resources/echo.job.yml          # Runnable Echo verification job
-├── scripts/                         # Catalog packaging and CI bundle validation
-├── databricks.yml                   # Bundle definition
-├── tests/                            # Repository wiring checks
-└── .github/workflows/ci.yml          # Verification and artifact publication
+integrations/<integration-id>/     Python package, lockfile, and behavior tests
+resources/<integration-id>.yml    Wheel artifact and runnable verification job
+scripts/check-integration.sh      Local and CI verification
+scripts/new-integration.sh        Integration scaffolding
+databricks.yml                    Shared bundle configuration
 ```
 
-Each integration owns its `pyproject.toml`, `uv.lock`, and virtual environment so future examples can use incompatible dependencies without destabilizing unrelated wheels.
-The YAML generator comes from the pinned `databricks-lakeflow-integrations` package and is not vendored here.
+Every integration has its own `uv.lock` and virtual environment so integrations can use incompatible dependencies without affecting each other.
+The published `databricks-lakeflow-integrations` package provides the authoring interface and YAML generator.
 
-## Develop locally
+## Verify an integration
 
-Install Python 3.12, [uv](https://docs.astral.sh/uv/), and Databricks CLI 1.7.0 or later.
-Databricks employees must route package downloads through the approved internal package proxy.
-The proxy may rewrite registry URLs in a local lockfile; restore those changes before committing because public CI uses the public PyPI URLs.
-
-Run the local equivalents of the CI checks:
+Install Python 3.12 and [uv](https://docs.astral.sh/uv/), then run:
 
 ```bash
-uv sync --project integrations/echo
-uv build integrations/echo --project integrations/echo --wheel --out-dir dist --clear --no-create-gitignore
-uv pip install --python integrations/echo/.venv/bin/python --reinstall --no-deps dist/lakeflow_echo-0.0.1-py3-none-any.whl
-integrations/echo/.venv/bin/python -m unittest discover -s integrations/echo/tests
-integrations/echo/.venv/bin/python scripts/package_catalog_artifact.py \
-  --integration-id echo \
-  --package-module lakeflow_echo \
-  --main lakeflow_echo.integration.echo \
-  --source integrations/echo/src/lakeflow_echo/integration.py \
-  --wheel dist/lakeflow_echo-0.0.1-py3-none-any.whl \
-  --environment-key echo_environment \
-  --output-dir build/catalog
-python -m unittest discover -s tests
-databricks bundle validate
+./scripts/check-integration.sh echo
 ```
 
-The packaging command generates and validates `build/catalog/echo/integration.yaml` and places it beside the source and wheel.
-Both catalog packaging and the DAB artifact build put `__DATABRICKS_CURATED_INTEGRATION_WHEEL_PATH__` in generated YAML.
-The frontend installer replaces that value with the workspace path where it uploads the wheel.
+The command installs locked dependencies, builds and installs the wheel, runs behavior tests, generates the catalog definition, and stages the complete artifact under `build/catalog/echo/`.
 
-## Deploy the bundle
+## Add an integration
 
-Authenticate the Databricks CLI to a workspace where Lakeflow Integrations are enabled, then run:
+Create the package and bundle boilerplate with:
+
+```bash
+./scripts/new-integration.sh my-integration "My Integration"
+```
+
+Then implement the integration, replace the generated test scaffold with behavior coverage, add runnable sample parameters to `resources/my-integration.yml`, and add the integration to the table above.
+Verify the result with:
+
+```bash
+./scripts/check-integration.sh my-integration
+```
+
+CI discovers integration directories automatically, so adding an integration does not require editing shared CI or bundle configuration.
+
+## Run the Echo job
+
+Install Databricks CLI 1.17.0 or later and authenticate to a workspace where Lakeflow Integrations are enabled.
+Then run:
 
 ```bash
 databricks bundle validate
@@ -59,13 +60,12 @@ databricks bundle deploy
 databricks bundle run echo_integration_test
 ```
 
-Deployment builds the Echo wheel and integration YAML, uploads them as bundle artifacts, and creates the Echo verification job.
 The job succeeds after printing `Hello from Lakeflow Integrations` three times.
 
-## Artifact publication
+## Published artifacts
 
-Pull requests and pushes to `main` install and test each built wheel, generate the YAML, validate the frontend artifact contract, and validate the bundle.
-Pushes to `main` also publish the latest artifacts to the `artifacts` branch under this layout:
+Pull requests build and test every integration and generate its catalog definition.
+Pushes to `main` publish the complete catalog to the machine-managed `artifacts` branch:
 
 ```text
 echo/
@@ -74,18 +74,15 @@ echo/
 └── lakeflow_echo-0.0.1-py3-none-any.whl
 ```
 
-The workflow creates the `artifacts` branch on its first successful run.
-Concurrent publishers retry against the latest branch head for up to eight minutes.
-Each changed artifact set replaces the branch contents, while an identical rerun is a no-op.
-The repository must allow GitHub Actions to write repository contents.
-The repository must be public before the frontend can fetch these URLs without GitHub credentials.
+Generated definitions contain `__DATABRICKS_CURATED_INTEGRATION_WHEEL_PATH__` exactly once.
+The Databricks installer replaces that value with the uploaded workspace wheel path.
 
-After publication, use the artifact commit SHA printed by the workflow in the frontend URLs:
+Use the artifact commit SHA printed by CI in immutable frontend URLs:
 
 ```text
 https://raw.githubusercontent.com/<owner>/<repo>/<artifact-commit-sha>/echo/integration.py
-https://raw.githubusercontent.com/<owner>/<repo>/<artifact-commit-sha>/echo/lakeflow_echo-0.0.1-py3-none-any.whl
 https://raw.githubusercontent.com/<owner>/<repo>/<artifact-commit-sha>/echo/integration.yaml
+https://raw.githubusercontent.com/<owner>/<repo>/<artifact-commit-sha>/echo/lakeflow_echo-0.0.1-py3-none-any.whl
 ```
 
-Pin the artifact commit SHA in frontend definitions so branch changes cannot alter a reviewed artifact set.
+The repository must allow GitHub Actions to write repository contents before the publication job can create or update the `artifacts` branch.
