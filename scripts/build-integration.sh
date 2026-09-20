@@ -24,6 +24,7 @@ readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly repository_root="$(cd -- "$script_dir/.." && pwd)"
 readonly project_dir="$repository_root/integrations/$integration_id"
 readonly lockfile_path="$project_dir/uv.lock"
+readonly python_path="$project_dir/.venv/bin/python"
 readonly output_dir="$project_dir/dist"
 
 [[ -f "$project_dir/pyproject.toml" ]] || fail "Integration does not exist: $integration_id"
@@ -58,6 +59,7 @@ fi
 
 uv build "$project_dir" \
   --project "$project_dir" \
+  --python "$python_path" \
   --wheel \
   --out-dir "$output_dir" \
   --clear \
