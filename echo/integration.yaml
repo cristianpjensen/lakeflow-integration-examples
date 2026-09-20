@@ -25,7 +25,7 @@
     "environment_key": "echo_environment",
     "environment_version": "5",
     "dependencies": [
-      "__DATABRICKS_CURATED_INTEGRATION_WHEEL_PATH__"
+      "{{WHEEL_PATH}}"
     ]
   }
 }
